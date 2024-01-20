@@ -1,0 +1,364 @@
+---
+title: "Celec_GusAureMae"
+author: "Maé SOULET"
+date: "2024-01-16"
+output: html_document
+---
+Installation packages et librairies.
+```{r}
+install.packages("stringr")
+library(stringr)
+install.packages("ggplot2")
+library(ggplot2)
+install.packages("corrplot")
+library(corrplot)
+install.packages("lmtest")
+library(lmtest)
+```
+
+Définition du working directory et de la data utilisée.
+```{r}
+setwd("/Users/mac/Desktop/econometrie/Projets")
+df = read.csv("rawdata.csv", dec = ",", sep = ";")
+summary(df)
+```
+
+Modification de la donnée pour qu'elle soit utilisable.
+```{r}
+df$Pop1 <- as.numeric(str_replace_all(df$Pop1, " ", ""))
+df$Pop2 <- as.numeric(str_replace_all(df$Pop2, " ", ""))
+df$PCelec = df$Pelec*100/df$IPC
+#PCelec correspond au prix constant de l'électricité (prix corrigé).
+#Pelec est le prix courant de l'électricité.
+df$Annee <- df$X
+summary(df)
+```
+
+Représentation des données brutes.
+```{r}
+ggplot(df, aes(Annee, Celec))+
+  geom_point(color = "blue")+
+  geom_line()+
+  theme_bw()
+#augmentation forte de la conso elec jusqu'en 2005. ensuite un peu en dents de scie, notamment selon les années de crise, mais tendance à la diminution lente depuis 2010 (peut être expliqué par le fait que le prix de l'élec augmente fortement depuis 2010)
+ggplot(df)+
+  geom_line(aes(Annee, Pelec), color="blue")+
+  geom_line(aes(Annee, PCelec), color="red")+
+  theme_bw()
+#à partir de 2010, 
+ggplot(df, aes(DJU, Celec))+
+  geom_point(aes(color=Annee), size=5)+
+  theme_bw()
+#interpretation : on s'attend à avoir que plus le DJU est élevé, plus la consommation est élevée, ce qui n'est pas le cas. explications possibles : les DJU élevés correspondent à des périodes plus anciennes (genre 1990), possible que les gens utilisaient moins d'élec car moins d'appareils électriques, moins de besoins, moins de moyens etc. + impact de la climatisation pour les périodes plus récentes qui doivent augmenter la conso élec.
+```
+
+On veut savoir si les données sont corrélées entre elles. Conclusion : il existe de fortes corrélations entre les données. 
+Corrélation attendues : POP 1 et POP 2
+Corrélation intéressantes : Celec et PCelec sont anti-corrélées mais pas très fortement (normal pour anti-corrélation, peut-être pas hyper corrélé car on doit consommer de l'élec qq soit le prix en vrai, bien indispensable)
+```{r}
+Matcorr <- cor(df[,-1])
+corrplot(Matcorr)
+corrplot(Matcorr, method = "number")
+```
+
+
+Possibilité de faire une transfo logarithmique. Run ce chunk uniquement si vous voulez avoir les données en log.
+```{r}
+df$logPIB = log(df$PIB)
+df$logPelec = log(df$Pelec)
+df$logPCelec = log(df$PCelec)
+df$logPop1 = log(df$Pop1)
+df$logDJU = log(df$DJU)
+df$logCelec = log(df$Celec)
+```
+
+On calcule les variables par tête pour le PIB et la conso élec (donc on utilise Pop2 population entière).
+```{r}
+df$PIBpt = df$PIB/df$Pop2
+df$Celecpt = df$Celec/df$Pop2
+```
+
+Vérification des hypothèses de linéarité : on exprime la variable dépendante C elec en fonction de tous les variables explicatives. On a quelques problèmes de linéarité. Comment les régler ?
+```{r}
+plot(df$PIB2014, df$Celec, main="Relation linéaire ?", xlab="PIB", ylab="Celec")
+#OK pour hyp linéarité
+plot(df$PCelec, df$Celec, main="Relation linéaire ?", xlab="PCelec", ylab="Celec")
+#OK mais pas ouf pour hyp linéarité
+plot(df$Pelec, df$Celec, main="Relation linéaire ?", xlab="Pelec", ylab="Celec")
+#Pas OK du tout pour hyp de linéarité
+#on ne peut pas travailler avec Pelec, on travaille avec PCelec ?
+plot(df$DJU, df$Celec, main="Relation linéaire ?", xlab="DJU", ylab="Celec")
+#Pas OK pour hyp de linéarité
+#les autres transformations quadratiques ou racines ne fonctionnent pas pour rendre plus linéaire
+plot(df$Pop1, df$Celec, main="Relation linéaire ?", xlab="logPop1", ylab="logCelec")
+#environ OK sauf à la fin
+plot(df$PIBpt, df$Celec, main="Relation linéaire ?", xlab="PIBpt", ylab="Celecpt")
+```
+
+
+Première régression linéaire multiple avec toutes les variables, procédure d'AIC pour arriver au meilleur modèle. Conclusion sur le résultat du modèle : 
+```{r}
+reg0 = lm(df$Celec ~ 1)
+modele0 = step(reg0, scope = ~  df$PIB2014 + df$PCelec + df$Pop2 + df$DJU+ df$Pelec + df$IPC.base100.2015, direction = "both") 
+summary(modele0)
+# Plus l'AIC est bas, mieux c'est. AIC cherche à choisir le modèle qui ajuste le mieux les données en donnant la moindre complexité (càd en limitant le nombre de paramètres). Modèle retenu est le modèle complet = lm(formula = df$Celec ~ df$PIB2014 + df$PCelec + df$DJU + df$Pop2). 
+#R2 = 0,98 / AIC 577.
+reg0 = lm(df$Celec ~ 1)
+modele1 = step(reg0, scope = ~  df$PIB2014 + df$PCelec + df$Pop2 + df$DJU+ df$Pelec + df$IPC.base100.2015 + df$Pop1, direction = "both") 
+summary(modele1)
+```
+Résultats de l'AIC : 
+Sélection de variables (toutes les variables au début, mais que Pop 2 et pas Pop 1)
+lm(formula = df$Celec ~ df$PIB2014 + df$PCelec + df$DJU + df$Pop2)
+Coefficients:
+              Estimate Std. Error t value Pr(>|t|)    
+(Intercept)  4.175e+04  7.657e+04   0.545   0.5899    
+df$PIB2014   6.212e+01  2.510e+01   2.475   0.0196 *  
+df$PCelec   -9.249e+02  7.575e+01 -12.210 9.88e-13 ***
+df$DJU       7.261e+04  1.265e+04   5.738 3.71e-06 ***
+df$Pop2      5.175e-03  2.084e-03   2.483   0.0193 *  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 5891 on 28 degrees of freedom
+Multiple R-squared:   0.98,	Adjusted R-squared:  0.9771 
+F-statistic: 342.7 on 4 and 28 DF,  p-value: < 2.2e-16
+
+Conclusion : variable intéressantes : df$PIB2014 + df$PCelec + df$DJU + df$Pop2. Significativité des variables surtout PCelec et DJU. 
+Observations et interprétations du modèle : 
+Si PIB, Pop2, DJU augmentent : augmentation de la consommation (normal)
+Si prix constant de l'élec augmente : diminution de la consommation (normal)
+
+AIC numéro 2 en ajoutant la donnée Pop1. 
+
+AIC=575.63
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-13649.1  -2637.2    887.9   2986.5  13056.8 
+
+Coefficients:
+              Estimate Std. Error t value Pr(>|t|)    
+(Intercept)  1.326e+05  8.851e+04   1.498   0.1456    
+df$PIB2014   4.653e+01  2.553e+01   1.823   0.0795 .  
+df$PCelec   -1.004e+03  8.440e+01 -11.894 3.04e-12 ***
+df$DJU       8.055e+04  1.289e+04   6.250 1.10e-06 ***
+df$Pop2      5.104e-02  2.497e-02   2.044   0.0509 .  
+df$Pop1     -4.814e-02  2.613e-02  -1.842   0.0764 .  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 5654 on 27 degrees of freedom
+Multiple R-squared:  0.9822,	Adjusted R-squared:  0.9789 
+F-statistic: 298.3 on 5 and 27 DF,  p-value: < 2.2e-16
+
+AIC plus bas, meilleur R2. Le modèle avec Pop1 et Pop2 semble meilleur. Mais bizarre pour l'interprétation car Pop1 et Pop2 variables ultra corrélées. 
+Interprétation des coefficients : si Pop1 augmente alors alors la Celec diminue (signe coeff), par contre coeff hyper faible. Voudrait dire que si pop France métropolitaine augmente, cela diminue la conso. Par contre si la pop France totale augmente, alors la conso augmente. TROP BIZARRE.
+Interprétation significativité : PCelec et DJU très significatives + coeff très élevés.
+
+
+Vérification hypothèses de la reg lin sur modele0
+```{r}
+par(mfrow = c(2,2))
+plot(modele0)
+#normalité OK (QQ plot) 
+#pour vérif test de Shapiro : 
+shapiro0 = shapiro.test(resid(modele0))
+print(shapiro0)
+#valeur proche de 1 + P-value supérieure à 0,05 : on garde hypothèse de normalité.
+
+#homoscédasticité bof (tendance)
+# Appliquer le test de White
+white_test0 <- bptest(modele0)
+print(white_test0)
+#on obtient :
+#BP = 4.3787, df = 4, p-value = 0.3572
+#on ne rejette donc pas H0 qui est qu'il y a homoscédasticité
+
+#indép des résidus ?
+acf(resid(modele0))
+#la plupart des barres sont dans intervalle de conf : indep des résidus
+
+#multicolinéarité ?
+library(car)
+vif(modele0)
+#multicolinéarité avec les variables PIB2014 et Pop2 (si supérieur à 10 alors indique une forte multicolinéarité)
+```
+Vérification hypothèses de la reg lin sur modele1
+```{r}
+par(mfrow = c(2,2))
+plot(modele1)
+#normalité OK (QQ plot) 
+#pour vérif test de Shapiro : 
+shapiro1 = shapiro.test(resid(modele1))
+print(shapiro1)
+#W = 0.94896, p-value = 0.1241
+#valeur proche de 1 + P-value supérieure à 0,05 : on garde hypothèse de normalité.
+
+#homoscédasticité bof (tendance)
+# Appliquer le test de White
+white_test1 <- bptest(modele1)
+print(white_test1)
+#on obtient : studentized Breusch-Pagan test 
+#BP = 5.8796, df = 5, p-value = 0.3181
+#on ne rejette donc pas H0 qui est qu'il y a homoscédasticité
+
+#indép des résidus ?
+acf(resid(modele1))
+#la plupart des barres sont dans intervalle de conf : indep des résidus
+
+#multicolinéarité ?
+library(car)
+vif(modele1)
+#multicolinéarité avec les variables PIB2014, Pop2 et Pop1 très fort (si supérieur à 10 alors indique une forte multicolinéarité)
+```
+Comparaison des deux modèles avec une analyse d'ANOVA. COnclusion : le modèle qui ajoute Pop1 n'est pas significatif par rapport (Fvalue sup à 0,05 mais de peu) au modèle fonctionnant avec uniquement Pop2. 
+On garde le modèle 0 qui est le plus simple.
+```{r}
+anova(modele0,modele1)
+print(anova)
+```
+
+On essaie d'améliorer le modèle 0 en rajoutant des termes d'interaction pour gérer le fait qu'il y ai multicolinéarité.
+
+```{r}
+modele01 = lm(df$Celec ~ df$PIB2014 + df$PCelec + df$DJU + df$Pop2 + df$PIB2014:df$Pop2)
+summary(modele01)
+par(mfrow = c(2,2))
+plot(modele01)
+#PCelec n'est plus significatif, on regarde dans modele02 ce que cela donne quand on le supprime
+modele02 = lm(df$Celec ~ df$PIB2014 + df$DJU + df$Pop2 + df$PIB2014:df$Pop2)
+summary(modele02)
+par(mfrow = c(2,2))
+plot(modele02)
+#on voit que toutes les variables sont significatives, très bon R2, il ne semble pas y avoir d'impact de la suppression de PCelec
+#on vérif avec une anova
+anova(modele01,modele02)
+#on garde le modele 02 en effet
+```
+
+
+Vérif hypothèses modèle 02 : 
+```{r}
+par(mfrow = c(2,2))
+plot(modele0)
+#normalité OK (QQ plot) 
+#pour vérif test de Shapiro : 
+shapiro0 = shapiro.test(resid(modele0))
+print(shapiro0)
+#valeur proche de 1 + P-value supérieure à 0,05 : on garde hypothèse de normalité.
+
+#homoscédasti
+# Appliquer le test de White
+white_test0 <- bptest(modele0)
+print(white_test0)
+#on obtient :
+#BP = 4.3787, df = 4, p-value = 0.3572
+#on ne rejette donc pas H0 qui est qu'il y a homoscédasticité
+
+#indép des résidus ?
+acf(resid(modele0))
+#la plupart des barres sont dans intervalle de conf : indep des résidus
+
+#multicolinéarité ?
+library(car)
+vif(modele0)
+#multicolinéarité avec les variables PIB2014 et Pop2 (si supérieur à 10 alors indique une forte multicolinéarité)
+```
+
+
+
+Si besoin, détail et autres tests permettant de vérif les hyp de reg lin. 
+
+Vérification de l'hypothèse d'homoscédasticité.
+```{r}
+plot(modele0, which=3)
+abline(h = 0, col = "green", lty = 2)
+
+# Appliquer le test de White
+white_test <- bptest(modele0)
+
+# Afficher les résultats du test
+print(white_test)
+
+
+```
+
+
+
+
+
+Vérification de l'hypothèse de normalité
+```{r}
+# Exemple avec modele0
+modele0 <- lm(df$Celec ~ df$PIB2014 + df$PCelec + df$DJU)
+plot(modele0, which=2)
+
+#Verif avec test de Shapiro
+# Test de Shapiro-Wilk pour la normalité des résidus
+shapiro = shapiro.test(resid(modele0))
+print(shapiro)
+#OK pour modele0
+```
+
+Vérification de l'indépendance des résidus (présence d'autocorrélation ?)
+```{r}
+modele0 <- lm(df$Celec ~ df$PIB2014 + df$PCelec + df$DJU)
+acf(resid(modele0))
+#pour modele0 hyp vérifiée (la plupart des barres sont contenues entre les deux barres bleues de l'intervalle de confiance)
+
+#deuxième méthode qui est celle 
+plot(predict(modele0), resid(modele0), main="Graphique des résidus", xlab="Valeurs prédites", ylab="Résidus")
+abline(h = 0, col="red")  # Ajoute la ligne horizontale à y=0
+```
+
+Vérification de l'absence de multicolinéarité
+```{r}
+# Calcul du facteur d'inflation de la variance
+library(car)
+vif(modele0)
+#interprétation pour modèle 1 : les VIF sont autour de 1 donc OK, pas de multicolinéarité
+```
+
+Distance de Cook pour regarder quelles sont les données aberrantes. Essayer de comprendre pourquoi ces observations sont très influentes.
+```{r}
+# Exemple sur le modèle 0 de lm.
+modele0 <- lm(df$logCelec ~ df$logPIB + df$logPCelec + df$logDJU)
+plot(modele0, which=4, main = "Graphique de Cook's distance")
+
+# Définition du seuil
+seuil_cook = 4/nrow(df)
+
+# Ajout d'une ligne pour indiquer le seuil
+abline(h = seuil_cook, col = "red", lty = 2)
+
+# Identifier les indices des observations avec une Cook's distance élevée
+indices_influents <- which(cooks.distance(modele0) > seuil_cook)
+print(indices_influents)
+```
+
+
+
+
+
+Ce qui était là de base dans le document, pour le moment je sais pas à quoi ça sert.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
